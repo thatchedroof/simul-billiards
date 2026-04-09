@@ -1,0 +1,8 @@
+- [ ] Better aim previews
+  - [ ] Design
+  - [ ] Movable end
+  - [ ] Collision point preview
+- [ ] Win condition
+- [ ] Energy bar
+- [ ] Powers
+- [ ] Online multiplayer

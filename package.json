@@ -1,0 +1,25 @@
+{
+  "name": "simul-billiards",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/jexl": "^2.3.4",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@dimforge/rapier2d-compat": "0.19.3",
+    "immer": "^11.1.4",
+    "jexl": "^2.3.0",
+    "phaser": "^3.90.0",
+    "phaser-box2d": "github:phaserjs/phaser-box2d",
+    "yaml": "^2.8.2",
+    "zod": "^4.3.6"
+  }
+}
