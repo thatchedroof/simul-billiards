@@ -49,7 +49,8 @@ export class Game extends Scene {
 
   /* Graphics */
   mapGraphics!: Phaser.GameObjects.Graphics;
-  aimGraphics!: Phaser.GameObjects.Graphics;
+  trajectoryRTs: Partial<Record<PuckId, Phaser.GameObjects.RenderTexture>> = {};
+  trajectoryGs: Partial<Record<PuckId, Phaser.GameObjects.Graphics>> = {};
   puckSprites: Record<
     PuckId,
     { sprite: Phaser.GameObjects.Arc; aimLine: Phaser.GameObjects.Rectangle }
@@ -139,13 +140,12 @@ export class Game extends Scene {
 
     // Graphics
     this.mapGraphics = this.add.graphics();
-    this.aimGraphics = this.add.graphics();
-    this.aimGraphics.setDepth(1000);
 
     this.cameras.main.centerOn(0, 0);
 
     this.initMap();
     this.initPanZoom();
+    this.initUI();
     this.initTurns();
     this.initPucks();
   }
@@ -159,7 +159,6 @@ export class Game extends Scene {
     );
     this.playerViews = this.program.stateToPlayerViews(this.state);
 
-    this.aimGraphics.clear();
     this.puckMoves = {};
 
     this.initPucks();
@@ -260,8 +259,7 @@ export class Game extends Scene {
         this.isAiming &&
         this.selectedPuck !== undefined
       ) {
-        this.aimGraphics.clear();
-        this.drawAimPreview(point);
+        // this.drawAimPreview(point);
 
         const aimVec = point.clone().subtract(this.aimStartWorld);
         this.puckMoves[this.selectedPuck] = aimVec;
@@ -331,11 +329,29 @@ export class Game extends Scene {
 
       // Clear puckMoves for the next turn
       this.puckMoves = {};
-      this.aimGraphics.clear();
 
       this.room.send("move", moves);
       this.waiting = true;
       console.log("Sent move, waiting for others");
+    });
+  }
+
+  initUI() {
+    const button = this.add
+      .text(20, 20, "Reset View", {
+        font: "50px Arial",
+        color: "#ffffff",
+        backgroundColor: "#000000",
+        padding: { left: 10, right: 10, top: 5, bottom: 5 },
+      })
+      .setScrollFactor(0)
+      .setDepth(1000)
+      .setInteractive({ useHandCursor: true });
+
+    button.on("pointerdown", () => {
+      const cam = this.cameras.main;
+      cam.zoom = 1;
+      cam.centerOn(0, 0);
     });
   }
 
@@ -399,18 +415,18 @@ export class Game extends Scene {
     }
   }
 
-  drawAimPreview(pointerWorld: Vector) {
-    if (this.selectedPuck === undefined) return;
+  // drawAimPreview(pointerWorld: Vector) {
+  //   if (this.selectedPuck === undefined) return;
 
-    const g = this.aimGraphics;
+  //   const g = this.aimGraphics;
 
-    // Aim line
-    g.lineStyle(2, 0xffffff, 0.9);
-    g.beginPath();
-    g.moveTo(this.aimStartWorld.x, this.aimStartWorld.y);
-    g.lineTo(pointerWorld.x, pointerWorld.y);
-    g.strokePath();
-  }
+  //   // Aim line
+  //   g.lineStyle(2, 0xffffff, 0.9);
+  //   g.beginPath();
+  //   g.moveTo(this.aimStartWorld.x, this.aimStartWorld.y);
+  //   g.lineTo(pointerWorld.x, pointerWorld.y);
+  //   g.strokePath();
+  // }
 
   predictTrajectory(
     moves: Record<PuckId, MoveSchema[]>,
@@ -425,11 +441,32 @@ export class Game extends Scene {
       },
     );
   }
+  getTrajectoryObjects(puckId: PuckId) {
+    let g = this.trajectoryGs[puckId];
+    let rt = this.trajectoryRTs[puckId];
+
+    if (!g) {
+      g = this.add.graphics();
+      g.setVisible(false); // only used as a drawing source
+      this.trajectoryGs[puckId] = g;
+    }
+
+    if (!rt) {
+      rt = this.add.renderTexture(0, 0, this.scale.width, this.scale.height);
+      rt.setOrigin(0, 0);
+      this.trajectoryRTs[puckId] = rt;
+    }
+
+    return { g, rt };
+  }
 
   drawPredictedTrajectory(predictions: Record<PuckId, PredictionResult>) {
-    const g = this.aimGraphics;
-
     for (const [puckId, { points, events }] of Object.entries(predictions)) {
+      const { g, rt } = this.getTrajectoryObjects(puckId as PuckId);
+
+      g.clear();
+      rt.clear();
+
       const pts = points.map((p) => physicsToPix(p.position));
       const puck = this.state.puckData[puckId as PuckId];
       const { color, secondaryColor } = puck.player
@@ -482,6 +519,15 @@ export class Game extends Scene {
           // Center circle
           g.fillCircle(pos.x, pos.y, 3);
         }
+      }
+
+      rt.draw(g);
+
+      // If puck isn't current player, add opacity to graphics
+      if (puck.player && puck.player !== this.playerId) {
+        rt.setAlpha(0.5);
+      } else {
+        rt.setAlpha(1);
       }
     }
   }
