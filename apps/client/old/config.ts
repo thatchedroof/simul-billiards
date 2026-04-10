@@ -2,9 +2,6 @@ import jexl from "jexl";
 import type Expression from "jexl/Expression";
 import YAML from "yaml";
 
-type Vector = Phaser.Math.Vector2;
-const Vector = Phaser.Math.Vector2;
-
 export type Hex = {
   q: number;
   r: number;

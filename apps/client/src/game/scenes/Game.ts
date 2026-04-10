@@ -1,36 +1,50 @@
 import { Scene } from "phaser";
 import {
+  applyIceDrag,
+  cloneWorld,
+  GameRoomState,
+  physicsToPix,
+  Player,
   pointInGround,
+  predictTrajectory,
+  stateFromRigidBody,
+  worldFromSnapshot,
   type Coordinate,
   type GameState,
   type Move,
   type MoveSchema,
   type PhysicsVec,
   type PhysicsWorld,
+  type PhysicsWorldSnapshot,
   type PixelVec,
+  type PlayerData,
+  type PlayerId,
   type PlayerView,
-  type Program,
-} from "../program.ts";
-import RAPIER, { init } from "@dimforge/rapier2d-compat";
-import type { PlayerId, PuckId } from "../config.ts";
-import {
-  applyIceDrag,
-  cloneWorld,
-  physicsToPix,
-  PPM,
-  stateFromRigidBody,
-  Vector,
   type PredictionResult,
-} from "../utils.ts";
+  type Program,
+  type PuckId,
+} from "@siturbi/shared";
+import RAPIER, { init } from "@dimforge/rapier2d-compat";
+import { Callbacks, Client, Room } from "@colyseus/sdk";
+import Vector from "victor";
+import { pixelVector } from "../utils.ts";
 
 export class Game extends Scene {
   program!: Program;
   state!: GameState;
   world!: PhysicsWorld;
 
+  gameStarted: boolean = false;
+  ready: boolean = false;
+  waiting: boolean = false;
+
+  /* Server */
+  client!: Client;
+  room!: Room<GameRoomState>;
+
   /* Players */
-  playerOrder: PlayerId[] = [];
-  currentPlayerIndex = 0;
+  playerId!: PlayerId;
+  playerData: Record<PlayerId, PlayerData> = {};
   playerViews!: Record<PlayerId, PlayerView>;
 
   /* Graphics */
@@ -54,9 +68,6 @@ export class Game extends Scene {
   /* Player moves */
   puckMoves: Record<PuckId, Vector> = {};
 
-  /* Global moves */
-  moves: Record<PlayerId, Move[]> = {};
-
   /* Simulation */
   simulationResult: Record<PuckId, PredictionResult> = {};
   simulating = false;
@@ -65,16 +76,68 @@ export class Game extends Scene {
   /* Config */
   predictStride = 1;
 
-  async create(program: Program) {
+  async create({ program, url }: { program: Program; url: string }) {
     await RAPIER.init();
 
-    this.program = program;
-    this.state = program.initialState({});
-    this.world = program.initialPhysics({}, this.state);
+    this.client = new Client(url);
+    console.log("Connecting to server at", url);
 
-    this.playerOrder = Object.keys(this.state.playerData) as PlayerId[];
+    // Join the room
+    try {
+      this.room = await this.client.joinOrCreate("game_room");
+      this.playerId = this.room.sessionId as PlayerId;
+      console.log("Joined successfully!");
+    } catch (e) {
+      console.error(e);
+    }
+
+    // Set up program state
+    this.program = program;
+    this.state = program.initialState({}, {});
+    this.world = program.initialPhysics({}, this.state, {});
     this.playerViews = this.program.stateToPlayerViews(this.state);
 
+    const callbacks = Callbacks.get(this.room);
+
+    callbacks.onAdd("players", (player: Player, key: string) => {
+      console.log("Player added:", key, player);
+      this.state.playerData[key as PlayerId] = player;
+      this.initPlayerData();
+    });
+
+    callbacks.onRemove("players", (player: Player, key: string) => {
+      console.log("Player removed:", key, player);
+      delete this.state.playerData[key as PlayerId];
+      this.initPlayerData();
+    });
+
+    callbacks.listen("gameStarted", (value: boolean) => {
+      console.log("Game started:", value);
+      this.gameStarted = value;
+    });
+
+    this.room.onMessage(
+      "turn",
+      ({
+        simulationResult,
+        snapshot,
+      }: {
+        simulationResult: Record<PuckId, PredictionResult>;
+        snapshot: PhysicsWorldSnapshot;
+      }) => {
+        // Start the visualization
+        this.simulating = true;
+        this.simStartTime = null;
+        this.waiting = false;
+
+        this.simulationResult = simulationResult;
+
+        // Sync the local physics world
+        this.world = worldFromSnapshot(snapshot);
+      },
+    );
+
+    // Graphics
     this.mapGraphics = this.add.graphics();
     this.aimGraphics = this.add.graphics();
     this.aimGraphics.setDepth(1000);
@@ -84,6 +147,21 @@ export class Game extends Scene {
     this.initMap();
     this.initPanZoom();
     this.initTurns();
+    this.initPucks();
+  }
+
+  initPlayerData() {
+    this.state = this.program.initialState({}, this.state.playerData);
+    this.world = this.program.initialPhysics(
+      {},
+      this.state,
+      this.state.playerData,
+    );
+    this.playerViews = this.program.stateToPlayerViews(this.state);
+
+    this.aimGraphics.clear();
+    this.puckMoves = {};
+
     this.initPucks();
   }
 
@@ -114,8 +192,13 @@ export class Game extends Scene {
   }
 
   initPucks() {
+    for (const puck of Object.values(this.puckSprites)) {
+      puck.sprite.destroy();
+      puck.aimLine.destroy();
+    }
+
     for (const [puckId, puck] of Object.entries(this.state.puckData)) {
-      const pos = this.program.coordToPos(puck.position);
+      const pos = puck.position;
       const player = puck.player ? this.state.playerData[puck.player] : null;
       const circle = this.add.circle(
         pos.x,
@@ -140,8 +223,8 @@ export class Game extends Scene {
     const cam = this.cameras.main;
 
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      const world = cam.getWorldPoint(p.x, p.y);
-      const hit = this?.findPuckAtWorldPoint(world as PixelVec);
+      const world = pixelVector(cam.getWorldPoint(p.x, p.y));
+      const hit = this?.findPuckAtWorldPoint(world);
 
       if (!this.simulating && hit && p.leftButtonDown()) {
         this.selectPuck(hit);
@@ -153,8 +236,8 @@ export class Game extends Scene {
       // this.selectedPuck = undefined;
 
       this.isDragging = true;
-      this.dragStart.set(p.x, p.y);
-      this.camStart.set(cam.scrollX, cam.scrollY);
+      this.dragStart = new Vector(p.x, p.y);
+      this.camStart = new Vector(cam.scrollX, cam.scrollY);
     });
 
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
@@ -163,7 +246,7 @@ export class Game extends Scene {
     });
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
-      const point = cam.getWorldPoint(p.x, p.y) as PixelVec;
+      const point = pixelVector(cam.getWorldPoint(p.x, p.y));
 
       if (this.isDragging) {
         const dx = (p.x - this.dragStart.x) / cam.zoom;
@@ -184,16 +267,16 @@ export class Game extends Scene {
         this.puckMoves[this.selectedPuck] = aimVec;
 
         const moves: Record<PlayerId, Move[]> = {
-          [this.playerOrder[this.currentPlayerIndex]]: Object.entries(
-            this.puckMoves,
-          ).map(([puckId, velocity]) => ({
-            type: "velocity",
-            puckId: puckId as PuckId,
-            velocity: new Vector(velocity.x / 50, velocity.y / 50),
-          })),
+          [this.playerId]: Object.entries(this.puckMoves).map(
+            ([puckId, velocity]) => ({
+              type: "velocity",
+              puckId: puckId as PuckId,
+              velocity: new Vector(velocity.x / 50, velocity.y / 50),
+            }),
+          ),
         };
 
-        const pts = this.predictTrajectory(cloneWorld(this.world), moves);
+        const pts = this.predictTrajectory(moves);
         this.drawPredictedTrajectory(pts);
       }
     });
@@ -219,24 +302,27 @@ export class Game extends Scene {
 
   initTurns() {
     this.input.keyboard?.on("keydown-SPACE", () => {
-      if (this.simulating) return;
-
-      // Add the puckMoves to global moves
-      const playerId = this.playerOrder[this.currentPlayerIndex];
-      if (!this.moves[playerId]) {
-        this.moves[playerId] = [];
+      if (!this.gameStarted) {
+        console.log("Signaling ready...");
+        this.room.send("ready", true);
+        this.ready = true;
+        return;
       }
+
+      if (this.simulating || this.waiting) return;
+
+      const moves: Move[] = [];
 
       for (const [puckId, velocity] of Object.entries(this.puckMoves)) {
         // If puck isn't movable by player, continue
         if (
-          !this.playerViews[playerId].moveSchemas.some(
+          !this.playerViews[this.playerId].moveSchemas.some(
             (ms) => ms.puckId === puckId && ms.type === "velocity",
           )
         ) {
           continue;
         }
-        this.moves[playerId].push({
+        moves.push({
           type: "velocity",
           puckId: puckId as PuckId,
           velocity: new Vector(velocity.x / 50, velocity.y / 50),
@@ -247,26 +333,18 @@ export class Game extends Scene {
       this.puckMoves = {};
       this.aimGraphics.clear();
 
-      // Run turn if all players have moved
-      if (this.currentPlayerIndex === this.playerOrder.length - 1) {
-        this.runTurn();
-        return;
-      }
-
-      // Advance to next player
-      this.currentPlayerIndex =
-        (this.currentPlayerIndex + 1) % this.playerOrder.length;
-
-      console.log(`Player ${this.playerOrder[this.currentPlayerIndex]}'s turn`);
+      this.room.send("move", moves);
+      this.waiting = true;
+      console.log("Sent move, waiting for others");
     });
   }
 
   findPuckAtWorldPoint(worldC: PixelVec): PuckId | undefined {
     let best: { puckId: PuckId; dist: number } | undefined = undefined;
 
-    for (const [puckId, _] of Object.entries(this.world.pucks)) {
+    for (const [puckId, _] of Object.entries(this.state.puckData)) {
       const puck = this.state.puckData[puckId as PuckId];
-      const pos = this.program.coordToPos(puck.position);
+      const pos = puck.position;
       const dist = Phaser.Math.Distance.Between(
         pos.x,
         pos.y,
@@ -287,7 +365,7 @@ export class Game extends Scene {
     const options: { move: MoveSchema; thisPlayer: boolean }[] = [];
 
     for (const [playerId, playerView] of Object.entries(this.playerViews)) {
-      const thisPlayer = playerId === this.playerOrder[this.currentPlayerIndex];
+      const thisPlayer = playerId === this.playerId;
 
       for (const moveSchema of playerView.moveSchemas) {
         if (moveSchema.puckId === puckId) {
@@ -317,8 +395,7 @@ export class Game extends Scene {
 
     if (options.some((o) => o.move.type === "velocity")) {
       this.isAiming = true;
-      const t = this.world.pucks[puckId].translation();
-      this.aimStartWorld = physicsToPix(t);
+      this.aimStartWorld = this.state.puckData[puckId as PuckId].position;
     }
   }
 
@@ -336,147 +413,17 @@ export class Game extends Scene {
   }
 
   predictTrajectory(
-    world: PhysicsWorld,
     moves: Record<PuckId, MoveSchema[]>,
   ): Record<PuckId, PredictionResult> {
-    const results: Record<PuckId, PredictionResult> = {};
-    const idByRBHandle: Record<number, PuckId> = {};
-
-    this.program.runTurn(this.state, world, moves);
-
-    // Add colliders to event queue
-    for (const [puckId, puck] of Object.entries(world.pucks)) {
-      idByRBHandle[puck.handle] = puckId as PuckId;
-      for (let i = 0; i < puck.numColliders(); i++) {
-        const col = world.rapierWorld.getCollider(puck.collider(i).handle);
-        col.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
-      }
-
-      // Add initial positions to results
-      results[puckId as PuckId] = {
-        points: [stateFromRigidBody(puck)],
-        events: [],
-      };
-    }
-
-    const eventQueue = new RAPIER.EventQueue(true);
-    const maxSteps = 60000;
-
-    const inactivePucks: Set<PuckId> = new Set();
-
-    for (let step = 0; step < maxSteps; step++) {
-      // Drain collision-start events; record puck centers at that step
-      eventQueue.drainCollisionEvents((c1, c2, started) => {
-        if (!started) return;
-
-        const col1 = world.rapierWorld.getCollider(c1);
-        const col2 = world.rapierWorld.getCollider(c2);
-
-        const rb1Handle = col1.parent()?.handle;
-        const rb2Handle = col2.parent()?.handle;
-
-        // Handle static collisions
-        if (rb1Handle === undefined || rb2Handle === undefined) {
-          const puckHandle = rb1Handle ?? rb2Handle;
-          const puckId = idByRBHandle[puckHandle!];
-          if (puckId) {
-            const puck = world.rapierWorld.getRigidBody(puckHandle!);
-
-            results[puckId].events.push({
-              type: "collision",
-              with: "wall",
-              state: stateFromRigidBody(puck),
-            });
-          }
-        }
-
-        const id1 = idByRBHandle[rb1Handle!];
-        const id2 = idByRBHandle[rb2Handle!];
-
-        const rb1 = world.rapierWorld.getRigidBody(rb1Handle!);
-        const rb2 = world.rapierWorld.getRigidBody(rb2Handle!);
-
-        const p1 = stateFromRigidBody(rb1);
-        const p2 = stateFromRigidBody(rb2);
-
-        // Push "collision centers" (not contact points)
-        if (id1) {
-          results[id1].events.push({
-            type: "collision",
-            with: "puck",
-            state: p1,
-          });
-        }
-        if (id2) {
-          results[id2].events.push({
-            type: "collision",
-            with: "puck",
-            state: p2,
-          });
-        }
-      });
-
-      let pucksSleeping = 0;
-
-      for (const [puckId, puck] of Object.entries(world.pucks)) {
-        if (inactivePucks.has(puckId as PuckId)) {
-          pucksSleeping++;
-          continue;
-        }
-
-        const sleeping = applyIceDrag(puck, world.rapierWorld.timestep);
-
-        if (sleeping) {
-          pucksSleeping++;
-        }
-      }
-
-      // Step with events
-      world.rapierWorld.step(eventQueue);
-
-      // Record trajectory samples
-      for (const [puckId, puck] of Object.entries(world.pucks)) {
-        if (inactivePucks.has(puckId as PuckId)) {
-          continue;
-        }
-
-        const p = stateFromRigidBody(puck);
-
-        // If puck is out of bounds, remove it from the simulation and stop tracking its trajectory
-        const pos = this.program.posToCoord(physicsToPix(p.position));
-        if (!pointInGround(pos, this.state.mapData.groundAreas)) {
-          world.rapierWorld.removeRigidBody(puck);
-
-          inactivePucks.add(puckId as PuckId);
-          results[puckId as PuckId].events.push({
-            type: "oob",
-            state: p,
-          });
-          continue;
-        }
-
-        if (step % this.predictStride === 0) {
-          results[puckId as PuckId].points.push(p);
-        }
-      }
-
-      if (pucksSleeping === Object.keys(world.pucks).length) {
-        // Add the final stop point of every puck to events
-        for (const [puckId, puck] of Object.entries(world.pucks)) {
-          if (inactivePucks.has(puckId as PuckId)) {
-            continue;
-          }
-
-          results[puckId as PuckId].events.push({
-            type: "stop",
-            state: stateFromRigidBody(puck),
-          });
-        }
-
-        break;
-      }
-    }
-    return results;
+    return predictTrajectory(
+      cloneWorld(this.world),
+      moves,
+      this.program,
+      this.state,
+      {
+        predictStride: this.predictStride,
+      },
+    );
   }
 
   drawPredictedTrajectory(predictions: Record<PuckId, PredictionResult>) {
@@ -539,25 +486,13 @@ export class Game extends Scene {
     }
   }
 
-  runTurn() {
-    if (this.simulating) return;
-    this.simulating = true;
-    this.simStartTime = null;
-
-    this.simulationResult = this.predictTrajectory(this.world, this.moves);
-    console.log(this.simulationResult);
-  }
-
   endTurn() {
-    this.moves = {};
-    this.currentPlayerIndex = 0;
-
     // Update the positions of the pucks
     for (const [puckId, result] of Object.entries(this.simulationResult)) {
       // Delete OOB pucks
       if (result.events.some((e) => e.type === "oob")) {
-        const puck = this.world.pucks[puckId as PuckId];
         delete this.world.pucks[puckId as PuckId];
+        delete this.state.puckData[puckId as PuckId];
 
         const { sprite, aimLine } = this.puckSprites[puckId as PuckId];
         sprite.destroy();
@@ -570,7 +505,7 @@ export class Game extends Scene {
         result.points[result.points.length - 1].position,
       );
       const puck = this.state.puckData[puckId as PuckId];
-      puck.position = this.program.posToCoord(finalPos);
+      puck.position = finalPos;
       const { sprite, aimLine } = this.puckSprites[puckId as PuckId];
       sprite.setPosition(finalPos.x, finalPos.y);
       aimLine.setPosition(finalPos.x, finalPos.y);
@@ -587,7 +522,6 @@ export class Game extends Scene {
       const elapsedMs = (time - this.simStartTime) / 1000;
       const speed = 0.75;
       const currentTimestep = Math.floor((elapsedMs / rapierTimestep) * speed);
-      console.log(currentTimestep);
 
       const finished: PuckId[] = [];
 

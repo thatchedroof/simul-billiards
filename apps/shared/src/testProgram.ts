@@ -1,47 +1,37 @@
-import { AUTO, Game } from "phaser";
-import { Game as MainGame } from "./scenes/Game.ts";
 import RAPIER from "@dimforge/rapier2d-compat";
-import { pixToPhysics, PPM, Vector } from "./utils.ts";
-import type { PuckId, PlayerId } from "./config.ts";
 import type {
   Program,
+  PuckId,
+  Coordinate,
+  PlayerId,
   GameState,
   PlayerView,
   PixelVec,
-  Coordinate,
-} from "./program.ts";
+  PuckData,
+} from "./program.js";
+import { pixToPhysics, PPM } from "./utils.js";
+import Vector from "victor";
 
-const testProgram: Program = {
-  initialState: () => {
-    // An alternating 5x5 grid of pucks each 5 squares apart
-    const puckData: Record<
-      PuckId,
-      { position: Coordinate; radius: number; player: PlayerId | null }
-    > = {};
-    const gridSize = 2;
-    const spacing = 5;
-    let puckIndex = 0;
-    for (let i = 0; i < gridSize; i++) {
-      for (let j = 0; j < gridSize; j++) {
-        const puckId = `puck${puckIndex}` as PuckId;
-        const x = j * spacing - ((gridSize - 1) * spacing) / 2;
-        const y = i * spacing - ((gridSize - 1) * spacing) / 2;
-        puckData[puckId] = {
-          position: new Vector(x, y) as Coordinate,
-          radius: 20,
-          player:
-            (i + j) % 2 === 0
-              ? ("player1" as PlayerId)
-              : ("player2" as PlayerId),
-        };
-        puckIndex++;
-      }
-    }
-
-    const playerData = {
-      player1: { color: 0xff0000, secondaryColor: 0xffaaaa },
-      player2: { color: 0x0000ff, secondaryColor: 0xaaaaff },
-    };
+export const testProgram: Program = {
+  initialState: (config, playerData) => {
+    const puckData: Record<PuckId, PuckData> = {};
+    // Create a puck for each player in a circle.
+    // If only one player has joined, put it in the center.
+    const playerIds = Object.keys(playerData);
+    const numPlayers = playerIds.length;
+    const radius = 5;
+    playerIds.forEach((playerId, index) => {
+      const angle = (index / numPlayers) * 2 * Math.PI;
+      const position = new Vector(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+      ) as Coordinate;
+      puckData[`puck-${playerId}` as PuckId] = {
+        position: testProgram.coordToPos(position),
+        radius: 20,
+        player: playerId as PlayerId,
+      };
+    });
 
     const mapData = {
       walls: [
@@ -88,7 +78,7 @@ const testProgram: Program = {
     let pucks: Record<PuckId, RAPIER.RigidBody> = {};
 
     for (const [id, puck] of Object.entries(state.puckData)) {
-      const pos = pixToPhysics(testProgram.coordToPos(puck.position));
+      const pos = pixToPhysics(puck.position);
       const rigidBodyDesc = RAPIER.RigidBodyDesc.dynamic()
         .setCcdEnabled(true)
         .setTranslation(pos.x, pos.y)
@@ -145,30 +135,3 @@ const testProgram: Program = {
     ) as Coordinate;
   },
 };
-
-const config: Phaser.Types.Core.GameConfig = {
-  type: AUTO,
-  width: 1920,
-  height: 1080,
-  parent: "game-container",
-  backgroundColor: "#0b5a2a",
-  scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-  },
-  scene: [
-    new MainGame({
-      key: "MainGame",
-    }),
-  ],
-};
-
-const StartGame = (parent: string) => {
-  const game = new Game({ ...config, parent });
-
-  game.scene.start("MainGame", testProgram);
-
-  return game;
-};
-
-export default StartGame;

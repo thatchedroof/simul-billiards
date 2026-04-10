@@ -1,13 +1,16 @@
-import { pointInPolygon, Vector } from "./utils.ts";
-import type { PlayerId, PuckId } from "./config.ts";
+import { pointInPolygon } from "./utils.js";
+import Vector from "victor";
 import RAPIER from "@dimforge/rapier2d-compat";
+
+export type PuckId = string & { __brand: "PuckId" };
+export type PlayerId = string & { __brand: "PlayerId" };
 
 export type Coordinate = Vector & { __brand: "Coordinate" };
 export type PixelVec = Vector & { __brand: "PixelVec" };
-export type PhysicsVec = RAPIER.Vector2;
+export type PhysicsVec = RAPIER.Vector2 & { __brand: "PhysicsVec" };
 
 export type PuckData = {
-  position: Coordinate;
+  position: PixelVec;
   radius: number;
   player: PlayerId | null;
 
@@ -36,7 +39,6 @@ export type MapData = {
 
 export type GameState = {
   winner: PlayerId | null;
-  playerData: Record<PlayerId, PlayerData>;
   puckData: Record<PuckId, PuckData>;
   mapData: MapData;
 
@@ -83,9 +85,22 @@ export type Move =
       [key: string]: any;
     };
 
+export type Config = {
+  [key: string]: any;
+};
+
 export type Program = {
-  initialState: (config: any) => GameState;
-  initialPhysics: (config: any, state: GameState) => PhysicsWorld;
+  minPlayers?: number;
+  maxPlayers?: number;
+  initialState: (
+    config: Config,
+    playerData: Record<PlayerId, PlayerData>,
+  ) => GameState;
+  initialPhysics: (
+    config: Config,
+    state: GameState,
+    playerData: Record<PlayerId, PlayerData>,
+  ) => PhysicsWorld;
   stateToPlayerViews: (state: GameState) => Record<PlayerId, PlayerView>;
   validateMoves: (
     state: GameState,

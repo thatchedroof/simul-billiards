@@ -1,0 +1,31 @@
+{
+  "name": "@siturbi/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc -p tsconfig.json --watch"
+  },
+  "dependencies": {
+    "@colyseus/schema": "^4.0.0",
+    "@colyseus/tools": "^0.17.0",
+    "@dimforge/rapier2d-compat": "0.19.3",
+    "chroma-js": "^3.2.0",
+    "colyseus": "^0.17.6",
+    "victor": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/chroma-js": "^3.1.2",
+    "@types/victor": "^1.1.5",
+    "typescript": "^5.8.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts"
+}

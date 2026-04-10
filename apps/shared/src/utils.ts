@@ -1,9 +1,8 @@
 import RAPIER from "@dimforge/rapier2d-compat";
-import type { PixelVec, PhysicsVec, PhysicsWorld } from "./program.ts";
-import type { PuckId } from "./config.ts";
-
-export type Vector = Phaser.Math.Vector2;
-export const Vector = Phaser.Math.Vector2;
+import type { PixelVec, PhysicsVec, PhysicsWorld } from "./index.js";
+import type { PuckId } from "./program.js";
+import chroma from "chroma-js";
+import Vector from "victor";
 
 export function vectorFrom(x: number, y: number): Vector;
 export function vectorFrom(obj: { x: number; y: number }): Vector;
@@ -25,7 +24,7 @@ export function vectorFrom(...args: any[]): Vector {
 export const PPM = 50;
 
 export function pixToPhysics(v: PixelVec): PhysicsVec {
-  return new RAPIER.Vector2(v.x / PPM, v.y / PPM);
+  return new RAPIER.Vector2(v.x / PPM, v.y / PPM) as PhysicsVec;
 }
 
 export function physicsToPix(v: PhysicsVec): PixelVec {
@@ -41,8 +40,8 @@ export type PhysicsPuckState = {
 
 export function stateFromRigidBody(rb: RAPIER.RigidBody): PhysicsPuckState {
   return {
-    position: rb.translation(),
-    velocity: rb.linvel(),
+    position: rb.translation() as PhysicsVec,
+    velocity: rb.linvel() as PhysicsVec,
     angle: rb.rotation(),
     angularVelocity: rb.angvel(),
   };
@@ -168,3 +167,58 @@ export function applyIceDrag(
 
   return false;
 }
+
+const GOLDEN_ANGLE = 137.50776405003785;
+
+export function generateColor(n: number): {
+  color: number;
+  secondaryColor: number;
+} {
+  return {
+    color: chroma.lch(70, 50, (n * GOLDEN_ANGLE) % 360).num(),
+    secondaryColor: chroma.lch(90, 50, (n * GOLDEN_ANGLE) % 360).num(),
+  };
+}
+
+export type PhysicsWorldSnapshot = {
+  rapierWorld: Uint8Array<ArrayBufferLike>;
+  pucks: Record<PuckId, number>;
+};
+
+export function snapshotFromWorld(world: PhysicsWorld): PhysicsWorldSnapshot {
+  const rapierWorld = world.rapierWorld.takeSnapshot();
+  const pucks: Record<PuckId, number> = {};
+  for (const [puckId, rigidBody] of Object.entries(world.pucks)) {
+    pucks[puckId as PuckId] = rigidBody.handle;
+  }
+  return { rapierWorld, pucks };
+}
+
+export function worldFromSnapshot(
+  snapshot: PhysicsWorldSnapshot,
+): PhysicsWorld {
+  const rapierWorld = RAPIER.World.restoreSnapshot(snapshot.rapierWorld);
+  const pucks: Record<PuckId, RAPIER.RigidBody> = {};
+  for (const [puckId, handle] of Object.entries(snapshot.pucks)) {
+    const rigidBody = rapierWorld.getRigidBody(handle);
+    if (rigidBody) {
+      pucks[puckId as PuckId] = rigidBody;
+    }
+  }
+  return { rapierWorld, pucks };
+}
+
+// export function worldFromSnapshot(
+//   snapshot: Uint8Array<ArrayBufferLike>,
+// ): PhysicsWorld {
+//   const rapierWorld = RAPIER.World.restoreSnapshot(snapshot);
+//   const pucks: Record<PuckId, RAPIER.RigidBody> = {};
+//   rapierWorld.forEachRigidBody((body: RAPIER.RigidBody) => {
+//     const data = body.userData as { puckId?: PuckId } | undefined;
+//     console.log(data);
+//     if (data?.puckId) {
+//       pucks[data.puckId] = body;
+//     }
+//   });
+//   return { rapierWorld, pucks };
+// }

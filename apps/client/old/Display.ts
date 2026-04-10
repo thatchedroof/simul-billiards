@@ -9,7 +9,7 @@ import {
   type Polygon,
   type Vec,
   stepPhysicsCCD,
-} from "../../../old/phys.ts";
+} from "./phys.ts";
 
 let i = 0;
 
