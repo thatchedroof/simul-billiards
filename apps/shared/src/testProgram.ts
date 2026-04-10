@@ -13,7 +13,7 @@ import { pixToPhysics, PPM } from "./utils.js";
 import Vector from "victor";
 
 export const testProgram: Program = {
-  initialState: (config, playerData) => {
+  initialState: (_, playerData) => {
     const puckData: Record<PuckId, PuckData> = {};
     // Create a puck for each player in a circle.
     // If only one player has joined, put it in the center.
@@ -111,9 +111,9 @@ export const testProgram: Program = {
     return playerViews;
   },
   validateMoves: () => true,
-  runTurn: (state, world, moves) => {
+  runTurn: (_, world, moves) => {
     // Apply moves to physics world
-    for (const [playerId, moveList] of Object.entries(moves)) {
+    for (const [_, moveList] of Object.entries(moves)) {
       for (const move of moveList) {
         if (move.type === "velocity") {
           const rigidBody = world.pucks[move.puckId as PuckId];

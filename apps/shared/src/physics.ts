@@ -50,7 +50,7 @@ export function predictTrajectory(
 
   for (let step = 0; step < maxSteps; step++) {
     // Drain collision-start events; record puck centers at that step
-    eventQueue.drainCollisionEvents((c1, c2, started) => {
+    eventQueue.drainCollisionEvents((c1: any, c2: any, started: any) => {
       if (!started) return;
 
       const col1 = world.rapierWorld.getCollider(c1);
