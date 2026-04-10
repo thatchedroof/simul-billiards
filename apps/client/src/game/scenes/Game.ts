@@ -28,6 +28,7 @@ import RAPIER, { init } from "@dimforge/rapier2d-compat";
 import { Callbacks, Client, Room } from "@colyseus/sdk";
 import Vector from "victor";
 import { makeRoundedButton, pixelVector } from "../utils.ts";
+import type { UIScene } from "./UI.ts";
 
 export class Game extends Scene {
   program!: Program;
@@ -37,6 +38,9 @@ export class Game extends Scene {
   gameStarted: boolean = false;
   ready: boolean = false;
   waiting: boolean = false;
+
+  /* UI */
+  ui!: UIScene;
 
   /* Server */
   client!: Client;
@@ -60,6 +64,11 @@ export class Game extends Scene {
   dragStart = new Vector(0, 0);
   camStart = new Vector(0, 0);
 
+  /* Pinch state */
+  pinchStartDistance: number | null = null;
+  pinchStartZoom: number | null = null;
+  pinchWorldCenter = new Vector(0, 0);
+
   /* Aim state */
   selectedPuck?: PuckId;
   isAiming = false;
@@ -72,9 +81,6 @@ export class Game extends Scene {
   simulationResult: Record<PuckId, PredictionResult> = {};
   simulating = false;
   simStartTime: number | null = null;
-
-  /* UI */
-  startGameButton!: Phaser.GameObjects.Text;
 
   /* Config */
   predictStride = 1;
@@ -119,12 +125,12 @@ export class Game extends Scene {
       this.gameStarted = value;
 
       if (this.gameStarted) {
-        this.startGameButton.setText("Submit move");
-        this.startGameButton.setBackgroundColor("#000080");
+        this.ui.startGameButton.setText("Submit move");
+        this.ui.startGameButton.setBackgroundColor("#000080");
       } else {
         this.ready = false;
-        this.startGameButton.setText("Not Ready");
-        this.startGameButton.setBackgroundColor("#800000");
+        this.ui.startGameButton.setText("Not Ready");
+        this.ui.startGameButton.setBackgroundColor("#800000");
       }
     });
 
@@ -149,9 +155,9 @@ export class Game extends Scene {
         this.world = worldFromSnapshot(snapshot);
 
         // Hide the start game button during simulation
-        this.startGameButton.setVisible(false);
-        this.startGameButton.setText("Submit move");
-        this.startGameButton.setBackgroundColor("#000080");
+        this.ui.startGameButton.setVisible(false);
+        this.ui.startGameButton.setText("Submit move");
+        this.ui.startGameButton.setBackgroundColor("#000080");
       },
     );
 
@@ -164,9 +170,14 @@ export class Game extends Scene {
 
     this.cameras.main.centerOn(0, 0);
 
+    // Launch UI scene and pass reference to this scene
+    this.scene.launch("UIScene");
+    this.ui = this.scene.get("UIScene") as UIScene;
+    this.ui.setGameScene(this);
+
     this.initMap();
     this.initPanZoom();
-    this.initUI();
+    // this.initUI();
     this.initTurns();
     this.initPucks();
   }
@@ -253,31 +264,109 @@ export class Game extends Scene {
   initPanZoom() {
     const cam = this.cameras.main;
 
+    // Needed so Phaser tracks 2 simultaneous touches
+    this.input.addPointer(1);
+
+    const getTouchPointers = () =>
+      this.input.manager.pointers.filter((p) => p.isDown);
+
+    const clampZoom = (zoom: number) => Phaser.Math.Clamp(zoom, 0.25, 3);
+
+    const getPinchDistance = (
+      a: Phaser.Input.Pointer,
+      b: Phaser.Input.Pointer,
+    ) => {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const getPinchCenter = (a: Phaser.Input.Pointer, b: Phaser.Input.Pointer) =>
+      new Vector((a.x + b.x) / 2, (a.y + b.y) / 2);
+
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      const touches = getTouchPointers();
+
+      // Two-finger gesture starts pinch zoom
+      if (touches.length >= 2) {
+        const [a, b] = touches;
+        this.isDragging = false;
+        this.isAiming = false;
+        this.deselectPuck();
+
+        this.pinchStartDistance = getPinchDistance(a, b);
+        this.pinchStartZoom = cam.zoom;
+
+        const center = getPinchCenter(a, b);
+        const worldCenter = cam.getWorldPoint(center.x, center.y);
+        this.pinchWorldCenter = new Vector(worldCenter.x, worldCenter.y);
+        return;
+      }
+
       const world = pixelVector(cam.getWorldPoint(p.x, p.y));
       const hit = this?.findPuckAtWorldPoint(world);
 
-      if (!this.simulating && hit && p.leftButtonDown()) {
-        this.selectPuck(hit);
-        this.isDragging = false;
-        return;
+      // Mouse click or single-touch on puck selects it
+      if (!this.simulating && hit) {
+        // For mouse, respect left button. For touch, button is irrelevant.
+        if (!p.wasTouch || p.leftButtonDown()) {
+          this.selectPuck(hit);
+          this.isDragging = false;
+          return;
+        }
       }
 
       this.isAiming = false;
       this.deselectPuck();
 
+      // Start panning
       this.isDragging = true;
       this.dragStart = new Vector(p.x, p.y);
       this.camStart = new Vector(cam.scrollX, cam.scrollY);
     });
 
-    this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
-      this.isDragging = false;
-      this.isAiming = false;
-      this.deselectPuck();
+    this.input.on("pointerup", () => {
+      const touches = getTouchPointers();
+
+      if (touches.length < 2) {
+        this.pinchStartDistance = null;
+        this.pinchStartZoom = null;
+      }
+
+      if (touches.length === 0) {
+        this.isDragging = false;
+        this.isAiming = false;
+        this.deselectPuck();
+      }
     });
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      const touches = getTouchPointers();
+
+      // Pinch zoom
+      if (
+        touches.length >= 2 &&
+        this.pinchStartDistance !== null &&
+        this.pinchStartZoom !== null
+      ) {
+        const [a, b] = touches;
+        const currentDistance = getPinchDistance(a, b);
+
+        if (currentDistance > 0) {
+          cam.zoom = clampZoom(
+            this.pinchStartZoom * (currentDistance / this.pinchStartDistance),
+          );
+
+          // Keep zoom centered on the pinch center
+          const center = getPinchCenter(a, b);
+          const newWorldCenter = cam.getWorldPoint(center.x, center.y);
+          cam.scrollX += this.pinchWorldCenter.x - newWorldCenter.x;
+          cam.scrollY += this.pinchWorldCenter.y - newWorldCenter.y;
+        }
+
+        return;
+      }
+
       const point = pixelVector(cam.getWorldPoint(p.x, p.y));
 
       if (this.isDragging) {
@@ -292,8 +381,6 @@ export class Game extends Scene {
         this.isAiming &&
         this.selectedPuck !== undefined
       ) {
-        // this.drawAimPreview(point);
-
         const aimVec = point.clone().subtract(this.aimStartWorld);
         this.puckMoves[this.selectedPuck] = aimVec;
 
@@ -314,19 +401,19 @@ export class Game extends Scene {
 
     this.input.on(
       "wheel",
-      (pointer: Phaser.Input.Pointer, dx: number, dy: number) => {
+      (pointer: Phaser.Input.Pointer, _dx: number, dy: number) => {
+        const oldWorld = cam.getWorldPoint(pointer.x, pointer.y);
         const zoomFactor = 1.015;
+
         if (dy > 0) {
-          cam.zoom /= zoomFactor;
+          cam.zoom = clampZoom(cam.zoom / zoomFactor);
         } else if (dy < 0) {
-          cam.zoom *= zoomFactor;
+          cam.zoom = clampZoom(cam.zoom * zoomFactor);
         }
 
-        // Optional: Zoom towards the pointer
-        const world = cam.getWorldPoint(pointer.x, pointer.y);
         const newWorld = cam.getWorldPoint(pointer.x, pointer.y);
-        cam.scrollX += world.x - newWorld.x;
-        cam.scrollY += world.y - newWorld.y;
+        cam.scrollX += oldWorld.x - newWorld.x;
+        cam.scrollY += oldWorld.y - newWorld.y;
       },
     );
   }
@@ -345,11 +432,11 @@ export class Game extends Scene {
       console.log("Signaling ready:", this.ready);
 
       if (this.ready) {
-        this.startGameButton.setText("Ready");
-        this.startGameButton.setBackgroundColor("#008000");
+        this.ui.startGameButton.setText("Ready");
+        this.ui.startGameButton.setBackgroundColor("#008000");
       } else {
-        this.startGameButton.setText("Not Ready");
-        this.startGameButton.setBackgroundColor("#800000");
+        this.ui.startGameButton.setText("Not Ready");
+        this.ui.startGameButton.setBackgroundColor("#800000");
       }
 
       return;
@@ -382,56 +469,25 @@ export class Game extends Scene {
     if (!this.waiting) {
       this.room.send("move", moves);
       this.waiting = true;
-      this.startGameButton.setText("Undo move");
-      this.startGameButton.setBackgroundColor("#800000");
+      this.ui.startGameButton.setText("Undo move");
+      this.ui.startGameButton.setBackgroundColor("#800000");
       console.log("Sent move, waiting for others");
     } else {
       this.room.send("undoMove");
       this.waiting = false;
-      this.startGameButton.setText("Submit move");
-      this.startGameButton.setBackgroundColor("#000080");
+      this.ui.startGameButton.setText("Submit move");
+      this.ui.startGameButton.setBackgroundColor("#000080");
       this.clearAimGraphics();
       console.log("Unsubmitted move");
     }
   }
 
   initUI() {
-    this.add
-      .text(20, 20, "Reset View", {
-        font: "40px",
-        color: "#ffffff",
-        backgroundColor: "#404040",
-        padding: { left: 20, right: 20, top: 10, bottom: 10 },
-      })
-      .setScrollFactor(0)
-      .setDepth(1000)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => {
-        const cam = this.cameras.main;
-        cam.zoom = 1;
-        cam.centerOn(0, 0);
-      });
-
-    this.startGameButton = this.add
-      .text(20, 95, "Not Ready", {
-        font: "40px",
-        color: "#ffffff",
-        backgroundColor: "#800000",
-        padding: { left: 20, right: 20, top: 10, bottom: 10 },
-      })
-      .setScrollFactor(0)
-      .setDepth(1000)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => {
-        this.sendBroadcast();
-      });
-
     // makeRoundedButton(this, 20, 20, 200, 40, "Reset View", () => {
     //   const cam = this.cameras.main;
     //   cam.zoom = 1;
     //   cam.centerOn(0, 0);
     // });
-
     // const panel = this.add
     //   .dom(100, 100)
     //   .createFromHTML(
@@ -651,7 +707,7 @@ export class Game extends Scene {
     this.drawPredictedTrajectory(pts);
 
     // Show the start game button again
-    this.startGameButton.setVisible(true);
+    this.ui.startGameButton.setVisible(true);
   }
 
   update(time: number) {

@@ -1,6 +1,7 @@
 import { AUTO, Game } from "phaser";
 import { Game as MainGame } from "./scenes/Game.ts";
 import { testProgram } from "@siturbi/shared";
+import { UIScene } from "./scenes/UI.ts";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: AUTO,
@@ -19,6 +20,7 @@ const config: Phaser.Types.Core.GameConfig = {
     new MainGame({
       key: "MainGame",
     }),
+    UIScene,
   ],
 };
 
