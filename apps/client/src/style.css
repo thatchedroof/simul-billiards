@@ -94,3 +94,45 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  pointer-events: auto;
+}
+
+.hidden {
+  display: none;
+}
+
+#game-root {
+  width: 800px;
+  height: 600px;
+  position: relative;
+}
+
+.menu {
+  width: 240px;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(20, 20, 30, 0.9);
+  color: white;
+  font-family: system-ui, sans-serif;
+  text-align: center;
+}
+
+.ui-btn {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}

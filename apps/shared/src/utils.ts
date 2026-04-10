@@ -56,6 +56,10 @@ export type PredictionResult = {
         state: PhysicsPuckState;
       }
     | {
+        type: "start";
+        state: PhysicsPuckState;
+      }
+    | {
         type: "stop";
         state: PhysicsPuckState;
       }

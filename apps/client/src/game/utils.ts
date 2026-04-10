@@ -7,16 +7,18 @@ export function pixelVector(
   return new Vector(v.x, v.y) as PixelVec;
 }
 
-const makeRoundedButton = (
-  g: Phaser.GameObjects.Graphics,
+export function makeRoundedButton(
+  scene: Phaser.Scene,
   x: number,
   y: number,
   width: number,
   height: number,
   label: string,
   onClick: () => void,
-) => {
+) {
   const radius = 10;
+
+  const g = scene.add.graphics().setScrollFactor(0).setDepth(1000);
 
   g.fillStyle(0x222222, 0.8);
   g.fillRoundedRect(x, y, width, height, radius);
@@ -26,9 +28,9 @@ const makeRoundedButton = (
 
   g.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
 
-  const text = this.add
+  const text = scene.add
     .text(x + 10, y + 10, label, {
-      fontSize: "16px",
+      fontSize: "30px",
       color: "#ffffff",
     })
     .setScrollFactor(0)
@@ -50,4 +52,4 @@ const makeRoundedButton = (
   });
 
   return { g, text };
-};
+}

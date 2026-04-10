@@ -80,6 +80,12 @@ export class GameRoom extends Room {
         this.moves = {};
       }
     },
+    undoMove: (client: Client) => {
+      const playerId = client.sessionId as PlayerId;
+      delete this.moves[playerId];
+
+      console.log(`Player ${playerId} has undone their move.`);
+    },
   };
 
   async onCreate(options: any) {

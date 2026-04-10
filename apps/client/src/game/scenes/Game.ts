@@ -27,7 +27,7 @@ import {
 import RAPIER, { init } from "@dimforge/rapier2d-compat";
 import { Callbacks, Client, Room } from "@colyseus/sdk";
 import Vector from "victor";
-import { pixelVector } from "../utils.ts";
+import { makeRoundedButton, pixelVector } from "../utils.ts";
 
 export class Game extends Scene {
   program!: Program;
@@ -49,8 +49,7 @@ export class Game extends Scene {
 
   /* Graphics */
   mapGraphics!: Phaser.GameObjects.Graphics;
-  trajectoryRTs: Partial<Record<PuckId, Phaser.GameObjects.RenderTexture>> = {};
-  trajectoryGs: Partial<Record<PuckId, Phaser.GameObjects.Graphics>> = {};
+  aimGraphics: Record<PuckId, Phaser.GameObjects.Graphics> = {};
   puckSprites: Record<
     PuckId,
     { sprite: Phaser.GameObjects.Arc; aimLine: Phaser.GameObjects.Rectangle }
@@ -73,6 +72,9 @@ export class Game extends Scene {
   simulationResult: Record<PuckId, PredictionResult> = {};
   simulating = false;
   simStartTime: number | null = null;
+
+  /* UI */
+  startGameButton!: Phaser.GameObjects.Text;
 
   /* Config */
   predictStride = 1;
@@ -115,6 +117,15 @@ export class Game extends Scene {
     callbacks.listen("gameStarted", (value: boolean) => {
       console.log("Game started:", value);
       this.gameStarted = value;
+
+      if (this.gameStarted) {
+        this.startGameButton.setText("Submit move");
+        this.startGameButton.setBackgroundColor("#000080");
+      } else {
+        this.ready = false;
+        this.startGameButton.setText("Not Ready");
+        this.startGameButton.setBackgroundColor("#800000");
+      }
     });
 
     this.room.onMessage(
@@ -130,11 +141,17 @@ export class Game extends Scene {
         this.simulating = true;
         this.simStartTime = null;
         this.waiting = false;
+        this.clearAimGraphics();
 
         this.simulationResult = simulationResult;
 
         // Sync the local physics world
         this.world = worldFromSnapshot(snapshot);
+
+        // Hide the start game button during simulation
+        this.startGameButton.setVisible(false);
+        this.startGameButton.setText("Submit move");
+        this.startGameButton.setBackgroundColor("#000080");
       },
     );
 
@@ -150,7 +167,14 @@ export class Game extends Scene {
     this.initPucks();
   }
 
+  clearAimGraphics() {
+    for (const g of Object.values(this.aimGraphics)) {
+      g.clear();
+    }
+  }
+
   initPlayerData() {
+    // Re-run the program's initial state and physics with the new player data
     this.state = this.program.initialState({}, this.state.playerData);
     this.world = this.program.initialPhysics(
       {},
@@ -162,6 +186,10 @@ export class Game extends Scene {
     this.puckMoves = {};
 
     this.initPucks();
+
+    // Draw initial prediction
+    const pts = this.predictTrajectory({});
+    this.drawPredictedTrajectory(pts);
   }
 
   initMap() {
@@ -232,7 +260,7 @@ export class Game extends Scene {
       }
 
       this.isAiming = false;
-      // this.selectedPuck = undefined;
+      this.deselectPuck();
 
       this.isDragging = true;
       this.dragStart = new Vector(p.x, p.y);
@@ -242,6 +270,7 @@ export class Game extends Scene {
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
       this.isDragging = false;
       this.isAiming = false;
+      this.deselectPuck();
     });
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
@@ -300,59 +329,127 @@ export class Game extends Scene {
 
   initTurns() {
     this.input.keyboard?.on("keydown-SPACE", () => {
-      if (!this.gameStarted) {
-        console.log("Signaling ready...");
-        this.room.send("ready", true);
-        this.ready = true;
-        return;
-      }
-
-      if (this.simulating || this.waiting) return;
-
-      const moves: Move[] = [];
-
-      for (const [puckId, velocity] of Object.entries(this.puckMoves)) {
-        // If puck isn't movable by player, continue
-        if (
-          !this.playerViews[this.playerId].moveSchemas.some(
-            (ms) => ms.puckId === puckId && ms.type === "velocity",
-          )
-        ) {
-          continue;
-        }
-        moves.push({
-          type: "velocity",
-          puckId: puckId as PuckId,
-          velocity: new Vector(velocity.x / 50, velocity.y / 50),
-        });
-      }
-
-      // Clear puckMoves for the next turn
-      this.puckMoves = {};
-
-      this.room.send("move", moves);
-      this.waiting = true;
-      console.log("Sent move, waiting for others");
+      this.sendBroadcast();
     });
   }
 
+  sendBroadcast() {
+    if (!this.gameStarted) {
+      this.ready = !this.ready;
+      this.room.send("ready", this.ready);
+
+      console.log("Signaling ready:", this.ready);
+
+      if (this.ready) {
+        this.startGameButton.setText("Ready");
+        this.startGameButton.setBackgroundColor("#008000");
+      } else {
+        this.startGameButton.setText("Not Ready");
+        this.startGameButton.setBackgroundColor("#800000");
+      }
+
+      return;
+    }
+
+    if (this.simulating) return;
+
+    const moves: Move[] = [];
+
+    for (const [puckId, velocity] of Object.entries(this.puckMoves)) {
+      // If puck isn't movable by player, continue
+      if (
+        !this.playerViews[this.playerId].moveSchemas.some(
+          (ms) => ms.puckId === puckId && ms.type === "velocity",
+        )
+      ) {
+        continue;
+      }
+      moves.push({
+        type: "velocity",
+        puckId: puckId as PuckId,
+        velocity: new Vector(velocity.x / 50, velocity.y / 50),
+      });
+    }
+
+    // Clear puckMoves for the next turn
+    this.puckMoves = {};
+    this.deselectPuck();
+
+    if (!this.waiting) {
+      this.room.send("move", moves);
+      this.waiting = true;
+      this.startGameButton.setText("Undo move");
+      this.startGameButton.setBackgroundColor("#800000");
+      console.log("Sent move, waiting for others");
+    } else {
+      this.room.send("undoMove");
+      this.waiting = false;
+      this.startGameButton.setText("Submit move");
+      this.startGameButton.setBackgroundColor("#000080");
+      this.clearAimGraphics();
+      console.log("Unsubmitted move");
+    }
+  }
+
   initUI() {
-    const button = this.add
+    this.add
       .text(20, 20, "Reset View", {
-        font: "50px Arial",
+        font: "40px",
         color: "#ffffff",
-        backgroundColor: "#000000",
-        padding: { left: 10, right: 10, top: 5, bottom: 5 },
+        backgroundColor: "#404040",
+        padding: { left: 20, right: 20, top: 10, bottom: 10 },
       })
       .setScrollFactor(0)
       .setDepth(1000)
-      .setInteractive({ useHandCursor: true });
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => {
+        const cam = this.cameras.main;
+        cam.zoom = 1;
+        cam.centerOn(0, 0);
+      });
 
-    button.on("pointerdown", () => {
-      const cam = this.cameras.main;
-      cam.zoom = 1;
-      cam.centerOn(0, 0);
-    });
+    this.startGameButton = this.add
+      .text(20, 95, "Not Ready", {
+        font: "40px",
+        color: "#ffffff",
+        backgroundColor: "#800000",
+        padding: { left: 20, right: 20, top: 10, bottom: 10 },
+      })
+      .setScrollFactor(0)
+      .setDepth(1000)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerdown", () => {
+        this.sendBroadcast();
+      });
+
+    // makeRoundedButton(this, 20, 20, 200, 40, "Reset View", () => {
+    //   const cam = this.cameras.main;
+    //   cam.zoom = 1;
+    //   cam.centerOn(0, 0);
+    // });
+
+    // const panel = this.add
+    //   .dom(100, 100)
+    //   .createFromHTML(
+    //     `
+    //       <div class="menu">
+    //         <h2>Pause</h2>
+    //         <button class="ui-btn" id="resumeBtn">Resume</button>
+    //         <button class="ui-btn" id="quitBtn">Quit</button>
+    //       </div>
+    //     `,
+    //   )
+    //   .setScrollFactor(0);
+    // const node = panel.node as HTMLElement;
+    // node.style.position = "fixed";
+    // node.style.left = "100px";
+    // node.style.top = "100px";
+    // node.querySelector("#resumeBtn")!.addEventListener("click", () => {
+    //   console.log("resume");
+    // });
+    // node.querySelector("#quitBtn")!.addEventListener("click", () => {
+    //   console.log("quit");
+    // });
   }
 
   findPuckAtWorldPoint(worldC: PixelVec): PuckId | undefined {
@@ -415,6 +512,14 @@ export class Game extends Scene {
     }
   }
 
+  deselectPuck() {
+    this.selectedPuck = undefined;
+
+    for (const { sprite } of Object.values(this.puckSprites)) {
+      sprite.setStrokeStyle(0, 0xffffff, 0);
+    }
+  }
+
   // drawAimPreview(pointerWorld: Vector) {
   //   if (this.selectedPuck === undefined) return;
 
@@ -441,31 +546,13 @@ export class Game extends Scene {
       },
     );
   }
-  getTrajectoryObjects(puckId: PuckId) {
-    let g = this.trajectoryGs[puckId];
-    let rt = this.trajectoryRTs[puckId];
-
-    if (!g) {
-      g = this.add.graphics();
-      g.setVisible(false); // only used as a drawing source
-      this.trajectoryGs[puckId] = g;
-    }
-
-    if (!rt) {
-      rt = this.add.renderTexture(0, 0, this.scale.width, this.scale.height);
-      rt.setOrigin(0, 0);
-      this.trajectoryRTs[puckId] = rt;
-    }
-
-    return { g, rt };
-  }
 
   drawPredictedTrajectory(predictions: Record<PuckId, PredictionResult>) {
+    this.clearAimGraphics();
     for (const [puckId, { points, events }] of Object.entries(predictions)) {
-      const { g, rt } = this.getTrajectoryObjects(puckId as PuckId);
-
-      g.clear();
-      rt.clear();
+      const g = this.aimGraphics[puckId as PuckId] || this.add.graphics();
+      this.aimGraphics[puckId as PuckId] = g;
+      g.setDepth(999);
 
       const pts = points.map((p) => physicsToPix(p.position));
       const puck = this.state.puckData[puckId as PuckId];
@@ -489,7 +576,7 @@ export class Game extends Scene {
               puck.radius * 2,
               // 2,
               currentColor ? color! : secondaryColor!,
-              1,
+              puck.player && puck.player !== this.playerId ? 0.5 : 1,
             );
             g.strokePath();
             g.beginPath();
@@ -521,14 +608,12 @@ export class Game extends Scene {
         }
       }
 
-      rt.draw(g);
-
       // If puck isn't current player, add opacity to graphics
-      if (puck.player && puck.player !== this.playerId) {
-        rt.setAlpha(0.5);
-      } else {
-        rt.setAlpha(1);
-      }
+      // if (puck.player && puck.player !== this.playerId) {
+      //   g.setAlpha(0.5);
+      // } else {
+      //   g.setAlpha(1);
+      // }
     }
   }
 
@@ -556,6 +641,13 @@ export class Game extends Scene {
       sprite.setPosition(finalPos.x, finalPos.y);
       aimLine.setPosition(finalPos.x, finalPos.y);
     }
+
+    // Draw the initial trajectory prediction
+    const pts = this.predictTrajectory({});
+    this.drawPredictedTrajectory(pts);
+
+    // Show the start game button again
+    this.startGameButton.setVisible(true);
   }
 
   update(time: number) {

@@ -7,6 +7,9 @@ const config: Phaser.Types.Core.GameConfig = {
   width: 1920,
   height: 1080,
   parent: "game-container",
+  dom: {
+    createContainer: true,
+  },
   backgroundColor: "#0b5a2a",
   scale: {
     mode: Phaser.Scale.FIT,

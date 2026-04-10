@@ -31,6 +31,8 @@ export function predictTrajectory(
   // Add colliders to event queue
   for (const [puckId, puck] of Object.entries(world.pucks)) {
     idByRBHandle[puck.handle] = puckId as PuckId;
+
+    // Activate collision events for all colliders of the puck
     for (let i = 0; i < puck.numColliders(); i++) {
       const col = world.rapierWorld.getCollider(puck.collider(i).handle);
       col.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
@@ -39,7 +41,12 @@ export function predictTrajectory(
     // Add initial positions to results
     results[puckId as PuckId] = {
       points: [stateFromRigidBody(puck)],
-      events: [],
+      events: [
+        {
+          type: "start",
+          state: stateFromRigidBody(puck),
+        },
+      ],
     };
   }
 
