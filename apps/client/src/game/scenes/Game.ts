@@ -157,6 +157,10 @@ export class Game extends Scene {
 
     // Graphics
     this.mapGraphics = this.add.graphics();
+    this.scale.on("resize", (gameSize: any) => {
+      const { width, height } = gameSize;
+      this.cameras.resize(width, height);
+    });
 
     this.cameras.main.centerOn(0, 0);
 

@@ -12,7 +12,7 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   backgroundColor: "#0b5a2a",
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   scene: [

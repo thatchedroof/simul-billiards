@@ -1,4 +1,5 @@
 import StartGame from "./game/main";
+import "./style.css";
 
 document.addEventListener("DOMContentLoaded", () => {
   const input = document.getElementById("server-url") as HTMLInputElement;
