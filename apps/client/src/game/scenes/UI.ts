@@ -27,7 +27,7 @@ export class UIScene extends Phaser.Scene {
       .setDepth(1000)
       .setInteractive({ useHandCursor: true })
       .on("pointerdown", () => {
-        const cam = this.cameras.main;
+        const cam = this.gameScene.cameras.main;
         cam.zoom = 1;
         cam.centerOn(0, 0);
       });
