@@ -16,22 +16,27 @@ export const testProgram: Program = {
   initialState: (_, playerData) => {
     const puckData: Record<PuckId, PuckData> = {};
     // Create a puck for each player in a circle.
-    // If only one player has joined, put it in the center.
     const playerIds = Object.keys(playerData);
     const numPlayers = playerIds.length;
     const radius = 5;
-    playerIds.forEach((playerId, index) => {
-      const angle = (index / numPlayers) * 2 * Math.PI;
-      const position = new Vector(
-        Math.cos(angle) * radius,
-        Math.sin(angle) * radius,
-      ) as Coordinate;
-      puckData[`puck-${playerId}` as PuckId] = {
-        position: testProgram.coordToPos(position),
-        radius: 20,
-        player: playerId as PlayerId,
-      };
-    });
+
+    let index = 0;
+    const n = numPlayers * 2;
+    for (let i = 0; i < 2; i++) {
+      playerIds.forEach((playerId) => {
+        const angle = (index / n) * 2 * Math.PI;
+        const position = new Vector(
+          Math.cos(angle) * radius,
+          Math.sin(angle) * radius,
+        ) as Coordinate;
+        puckData[`puck-${playerId}-${i}` as PuckId] = {
+          position: testProgram.coordToPos(position),
+          radius: 20,
+          player: playerId as PlayerId,
+        };
+        index++;
+      });
+    }
 
     const mapData = {
       walls: [

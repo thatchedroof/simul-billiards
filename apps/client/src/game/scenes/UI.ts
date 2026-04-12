@@ -6,6 +6,7 @@ export class UIScene extends Phaser.Scene {
   /* UI Elements */
   resetViewButton!: Phaser.GameObjects.Text;
   startGameButton!: Phaser.GameObjects.Text;
+  readyText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: "UIScene", active: false });
@@ -45,5 +46,25 @@ export class UIScene extends Phaser.Scene {
       .on("pointerdown", () => {
         this.gameScene.sendBroadcast();
       });
+  }
+
+  buttonReadyState(ready: boolean) {
+    if (ready) {
+      this.startGameButton.setText("Not ready yet");
+      this.startGameButton.setBackgroundColor("#000080");
+    } else {
+      this.startGameButton.setText("I'm ready!");
+      this.startGameButton.setBackgroundColor("#000080");
+    }
+  }
+
+  buttonSubmitState(submitted: boolean) {
+    if (submitted) {
+      this.startGameButton.setText("Unsubmit move");
+      this.startGameButton.setBackgroundColor("#800000");
+    } else {
+      this.startGameButton.setText("Submit move");
+      this.startGameButton.setBackgroundColor("#000080");
+    }
   }
 }

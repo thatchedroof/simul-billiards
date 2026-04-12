@@ -1,5 +1,5 @@
-import StartGame from "./game/main";
 import "./style.css";
+import { StartGame } from "./game/main";
 
 document.addEventListener("DOMContentLoaded", () => {
   const input = document.getElementById("server-url") as HTMLInputElement;
@@ -24,6 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("ui")!.style.display = "none";
 
     // Start the game with the URL
-    StartGame("game-container", url);
+    StartGame({ parent: "game-container", url });
+    // StartGame({ parent: "game-container-2", url });
   });
 });

@@ -125,12 +125,10 @@ export class Game extends Scene {
       this.gameStarted = value;
 
       if (this.gameStarted) {
-        this.ui.startGameButton.setText("Submit move");
-        this.ui.startGameButton.setBackgroundColor("#000080");
+        this.ui.buttonSubmitState(false);
       } else {
         this.ready = false;
-        this.ui.startGameButton.setText("Not Ready");
-        this.ui.startGameButton.setBackgroundColor("#800000");
+        this.ui.buttonReadyState(false);
       }
     });
 
@@ -156,8 +154,7 @@ export class Game extends Scene {
 
         // Hide the start game button during simulation
         this.ui.startGameButton.setVisible(false);
-        this.ui.startGameButton.setText("Submit move");
-        this.ui.startGameButton.setBackgroundColor("#000080");
+        this.ui.buttonSubmitState(false);
       },
     );
 
@@ -249,9 +246,11 @@ export class Game extends Scene {
         player?.color || 0x808080,
       );
       circle.setStrokeStyle(0, 0xffffff, 0);
+      circle.setDepth(2);
 
       const line = this.add.rectangle(pos.x, pos.y, puck.radius, 4, 0xffffff);
       line.setOrigin(0, 0.5);
+      line.setDepth(2);
 
       this.world.pucks[puckId as PuckId].userData = {
         sprite: circle,
@@ -432,11 +431,9 @@ export class Game extends Scene {
       console.log("Signaling ready:", this.ready);
 
       if (this.ready) {
-        this.ui.startGameButton.setText("Ready");
-        this.ui.startGameButton.setBackgroundColor("#008000");
+        this.ui.buttonReadyState(true);
       } else {
-        this.ui.startGameButton.setText("Not Ready");
-        this.ui.startGameButton.setBackgroundColor("#800000");
+        this.ui.buttonReadyState(false);
       }
 
       return;
@@ -469,14 +466,12 @@ export class Game extends Scene {
     if (!this.waiting) {
       this.room.send("move", moves);
       this.waiting = true;
-      this.ui.startGameButton.setText("Undo move");
-      this.ui.startGameButton.setBackgroundColor("#800000");
+      this.ui.buttonSubmitState(true);
       console.log("Sent move, waiting for others");
     } else {
       this.room.send("undoMove");
       this.waiting = false;
-      this.ui.startGameButton.setText("Submit move");
-      this.ui.startGameButton.setBackgroundColor("#000080");
+      this.ui.buttonSubmitState(false);
       this.clearAimGraphics();
       console.log("Unsubmitted move");
     }
@@ -612,7 +607,7 @@ export class Game extends Scene {
     for (const [puckId, { points, events }] of Object.entries(predictions)) {
       const g = this.aimGraphics[puckId as PuckId] || this.add.graphics();
       this.aimGraphics[puckId as PuckId] = g;
-      g.setDepth(999);
+      g.setDepth(0);
 
       const pts = points.map((p) => physicsToPix(p.position));
       const puck = this.state.puckData[puckId as PuckId];
@@ -667,6 +662,8 @@ export class Game extends Scene {
           g.fillCircle(pos.x, pos.y, 3);
         }
       }
+
+      // Redraw puck and aimline
 
       // If puck isn't current player, add opacity to graphics
       // if (puck.player && puck.player !== this.playerId) {

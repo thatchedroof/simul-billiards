@@ -73,6 +73,11 @@ button:focus-visible {
   height: 100dvh;
 }
 
+#game-container-2 {
+  width: 100vw;
+  /* height: 50dvh; */
+}
+
 .menu {
   width: 240px;
   padding: 16px;
